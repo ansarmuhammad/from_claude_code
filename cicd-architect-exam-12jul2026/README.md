@@ -10,6 +10,8 @@ pyramid (unit → integration → e2e → performance). Built as a hands-on stud
 environment for CI/CD and cloud architecture exam prep — start with
 [`docs/exam-prep-notes.md`](docs/exam-prep-notes.md).
 
+**Repo**: https://github.com/ansarmuhammad/from_claude_code/tree/mlx/cicd-architect-exam-12jul2026
+
 ## Project Structure
 
 ```
