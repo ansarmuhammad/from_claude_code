@@ -55,8 +55,9 @@ MISSING_TOOLS=()
 check_tool() {
   local tool="$1"
   local hint="$2"
+  local version_args="${3:---version}"
   if command -v "${tool}" >/dev/null 2>&1; then
-    log "Found ${tool}: $("${tool}" --version 2>&1 | head -n1)"
+    log "Found ${tool}: $("${tool}" ${version_args} 2>&1 | head -n1)"
   else
     warn "${tool} not found. ${hint}"
     MISSING_TOOLS+=("${tool}")
@@ -79,7 +80,7 @@ else
   COMPOSE_CMD="docker-compose"
 fi
 
-check_tool kubectl "Install: https://kubernetes.io/docs/tasks/tools/ (needed for scripts/deploy.sh, scripts/rollback.sh)"
+check_tool kubectl "Install: https://kubernetes.io/docs/tasks/tools/ (needed for scripts/deploy.sh, scripts/rollback.sh)" "version --client"
 check_tool terraform "Install: https://developer.hashicorp.com/terraform/install (needed for the terraform/ IaC)"
 
 if [[ ${#MISSING_TOOLS[@]} -gt 0 ]]; then
