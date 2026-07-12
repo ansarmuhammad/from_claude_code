@@ -1,0 +1,35 @@
+# Multi-stage build for React web frontend
+# Stage 1: Build
+FROM node:18-alpine as builder
+
+WORKDIR /app
+
+# Copy package files first for better caching
+COPY package.json package-lock.json* ./
+RUN npm install
+
+# Copy source and build
+COPY . .
+RUN npm run build
+
+# Stage 2: Serve with nginx
+FROM nginx:1.25-alpine
+
+# Copy custom nginx config (must live inside the build context: ./apps/web-frontend)
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy built assets from builder stage
+COPY --from=builder /app/build /usr/share/nginx/html
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:3000/health || exit 1
+
+# Labels for metadata
+LABEL maintainer="DevOps Team" \
+      version="1.0.0" \
+      description="Web Frontend for CI/CD Practice"
+
+EXPOSE 3000
+
+CMD ["nginx", "-g", "daemon off;"]

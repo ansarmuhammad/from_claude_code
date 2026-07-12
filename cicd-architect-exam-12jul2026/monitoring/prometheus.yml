@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alerts.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+scrape_configs:
+  # Prometheus self-scrape
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # FastAPI API service - exposes /metrics via prometheus_client
+  - job_name: "api-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api-service:8000"]
+        labels:
+          service: "api-service"
+
+  # Celery worker service - exposes a standalone prometheus_client
+  # http server on METRICS_PORT (default 9100)
+  - job_name: "worker-service"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["worker-service:9100"]
+        labels:
+          service: "worker-service"
+
+  # postgres-exporter / redis-exporter are intentionally omitted: no such
+  # containers exist in docker-compose.yml today. Add a job here (job_name
+  # "postgres-exporter" / "redis-exporter", default ports 9187 / 9121) if an
+  # exporter sidecar is ever added to docker-compose.yml.

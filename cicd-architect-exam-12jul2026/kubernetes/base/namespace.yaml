@@ -1,0 +1,18 @@
+# NOTE: kept as a reference/template only - intentionally NOT listed as a
+# resource in ./kustomization.yaml.
+#
+# Rationale: each overlay (dev/staging/production/blue,green) owns its own
+# Namespace object (see overlays/<env>/namespace.yaml) and sets the
+# `namespace:` field in its kustomization.yaml. Keeping namespace creation
+# out of base is the standard Kustomize pattern - base stays
+# environment-agnostic. It also avoids a real footgun: Kustomize's
+# namespace transformer rewrites metadata.name on any Namespace-kind
+# resource it finds, so a base-owned Namespace object would get silently
+# renamed to whatever the overlay's `namespace:` field says, which is
+# confusing to read and easy to get wrong across three overlays.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: PLACEHOLDER
+  labels:
+    name: PLACEHOLDER

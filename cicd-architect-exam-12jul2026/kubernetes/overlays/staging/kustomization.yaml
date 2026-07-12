@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: staging
+
+resources:
+  - ../../base
+  - namespace.yaml
+
+# Replica count matches base default (2) for staging - no patch needed.
+
+configMapGenerator:
+  - name: app-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=staging
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+images:
+  - name: api-service
+    newName: ghcr.io/ansarmuhammad/from_claude_code/api-service
+    newTag: staging
+  - name: worker-service
+    newName: ghcr.io/ansarmuhammad/from_claude_code/worker-service
+    newTag: staging
+  - name: web-frontend
+    newName: ghcr.io/ansarmuhammad/from_claude_code/web-frontend
+    newTag: staging

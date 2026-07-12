@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-service
+  labels:
+    app.kubernetes.io/name: worker-service
+    app: worker-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: worker-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: worker-service
+        app: worker-service
+    spec:
+      containers:
+        - name: worker-service
+          image: worker-service:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          # No HTTP endpoint on a Celery worker, so use an exec probe that
+          # mirrors docker/Dockerfile.worker-service's own HEALTHCHECK.
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "celery -A worker inspect ping -d celery@$HOSTNAME"
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "celery -A worker inspect ping -d celery@$HOSTNAME"
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 3

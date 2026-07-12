@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment-api-service.yaml
+  - service-api-service.yaml
+  - deployment-worker-service.yaml
+  - deployment-web-frontend.yaml
+  - service-web-frontend.yaml
+  - configmap.yaml
+  - secret.yaml
+  - hpa.yaml
+
+images:
+  - name: api-service
+    newName: api-service
+    newTag: latest
+  - name: worker-service
+    newName: worker-service
+    newTag: latest
+  - name: web-frontend
+    newName: web-frontend
+    newTag: latest

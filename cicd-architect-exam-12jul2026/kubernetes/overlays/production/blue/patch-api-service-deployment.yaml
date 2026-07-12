@@ -1,0 +1,33 @@
+# JSON6902 patch applied to base's Deployment/api-service, scoped via the
+# `target` matcher in kustomization.yaml (matched by its ORIGINAL name
+# before this patch renames it). This is what gives us a distinct
+# api-service-blue Deployment that coexists with api-service-green in the
+# same `production` namespace, without either one's ReplicaSet controller
+# accidentally adopting the other's pods.
+- op: replace
+  path: /metadata/name
+  value: api-service-blue
+- op: add
+  path: /metadata/labels/version
+  value: blue
+- op: add
+  path: /spec/selector/matchLabels/version
+  value: blue
+- op: add
+  path: /spec/template/metadata/labels/version
+  value: blue
+- op: replace
+  path: /spec/replicas
+  value: 3
+- op: replace
+  path: /spec/template/spec/containers/0/resources/limits/cpu
+  value: "1"
+- op: replace
+  path: /spec/template/spec/containers/0/resources/limits/memory
+  value: 1Gi
+- op: replace
+  path: /spec/template/spec/containers/0/resources/requests/cpu
+  value: 250m
+- op: replace
+  path: /spec/template/spec/containers/0/resources/requests/memory
+  value: 256Mi

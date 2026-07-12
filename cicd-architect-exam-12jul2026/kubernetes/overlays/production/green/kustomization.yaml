@@ -1,0 +1,44 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: production
+
+resources:
+  - ../../../base
+  - namespace.yaml
+
+# Only the api-service Deployment (and its HPA) get a per-color identity.
+# worker-service, web-frontend, the api-service Service, ConfigMap and
+# Secret are NOT versioned - they come through unmodified from base and are
+# shared by both blue/ and green/. Re-applying them from whichever overlay
+# runs second is a no-op (identical content), which is what lets the CI/CD
+# workflow apply green/ first and blue/ second without conflict.
+patches:
+  - path: patch-api-service-deployment.yaml
+    target:
+      kind: Deployment
+      name: api-service
+  - path: patch-api-service-hpa.yaml
+    target:
+      kind: HorizontalPodAutoscaler
+      name: api-service
+
+configMapGenerator:
+  - name: app-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=production
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+images:
+  - name: api-service
+    newName: ghcr.io/ansarmuhammad/from_claude_code/api-service
+    newTag: latest
+  - name: worker-service
+    newName: ghcr.io/ansarmuhammad/from_claude_code/worker-service
+    newTag: latest
+  - name: web-frontend
+    newName: ghcr.io/ansarmuhammad/from_claude_code/web-frontend
+    newTag: latest

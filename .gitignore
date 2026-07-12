@@ -31,3 +31,21 @@ finetune-with-mlx/**/.DS_Store
 finetune-with-mlx/.claude/
 finetune-with-mlx/.deepeval/
 finetune-with-mlx/.deepeval_telemetry.txt
+
+# CI/CD architect exam prep project
+!cicd-architect-exam-12jul2026/
+!cicd-architect-exam-12jul2026/**
+
+# Exclude regenerable / heavy artifacts within the CI/CD project
+cicd-architect-exam-12jul2026/**/node_modules/
+cicd-architect-exam-12jul2026/**/build/
+cicd-architect-exam-12jul2026/**/__pycache__/
+cicd-architect-exam-12jul2026/**/*.pyc
+cicd-architect-exam-12jul2026/**/.pytest_cache/
+cicd-architect-exam-12jul2026/**/.coverage
+cicd-architect-exam-12jul2026/**/.DS_Store
+cicd-architect-exam-12jul2026/**/venv/
+cicd-architect-exam-12jul2026/**/.terraform/
+cicd-architect-exam-12jul2026/**/*.tfstate
+cicd-architect-exam-12jul2026/**/*.tfstate.*
+cicd-architect-exam-12jul2026/.env

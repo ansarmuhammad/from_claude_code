@@ -1,0 +1,8 @@
+# Keep the HPA name/target in lock-step with the renamed Deployment so
+# blue's and green's HPAs don't collide on the same object name.
+- op: replace
+  path: /metadata/name
+  value: api-service-green
+- op: replace
+  path: /spec/scaleTargetRef/name
+  value: api-service-green

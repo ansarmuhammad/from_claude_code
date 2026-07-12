@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  labels:
+    app.kubernetes.io/part-of: cicd-architect-exam
+data:
+  ENVIRONMENT: "base"
+  LOG_LEVEL: "info"
+  REACT_APP_API_URL: "http://api-service:8000"
