@@ -27,6 +27,8 @@ services:
     build:
       context: ./apps/worker-service
       dockerfile: ../../docker/Dockerfile.worker-service
+    ports:
+      - "9100:9100"
     environment:
       - ENVIRONMENT=development
       - CELERY_BROKER_URL=redis://redis:6379/0

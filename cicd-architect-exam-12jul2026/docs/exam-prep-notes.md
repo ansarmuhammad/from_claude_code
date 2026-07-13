@@ -171,7 +171,7 @@ both expose Prometheus metrics.
 | Golden signal | Where it's covered here | Gap |
 |---|---|---|
 | **Latency** | `api_request_duration_seconds` (Histogram, api-service); `worker_task_duration_seconds` (Histogram, worker-service) | `api_request_duration_seconds` was originally declared but never `.observe()`'d anywhere in `app.py` - a real instance of "declaring a metric isn't the same as instrumenting the code path that should update it." It's since been fixed with an `@app.middleware("http")` handler that times every request and observes the duration. `worker_task_duration_seconds` was correctly wired from the start via Celery's `task_prerun`/`task_success` signals. Still worth a habit for the exam: whenever you see a `Histogram`/`Counter` declared, grep for `.observe(`/`.inc(` to confirm it's actually reachable from a real code path, not just declared. |
-| **Traffic** | `api_requests_total` Counter, labeled by method/endpoint/status, incremented per endpoint | Present and actually used per-endpoint. |
+| **Traffic** | `api_requests_total` Counter, labeled by method/endpoint/status, now incremented via a single `@app.middleware("http")` handler covering every route | Two real bugs were found and fixed here. First, the counter was originally only incremented inside the Task CRUD handlers - hitting `/health`, `/`, or the new demo endpoints never counted at all, even though the doc previously (incorrectly) said it was "used per-endpoint". Second, and more seriously: the original per-handler calls labeled `endpoint` with the *resolved* path (e.g. `/api/v1/tasks/28f1...-uuid`), so every distinct task id became its own permanent Prometheus time series - unbounded cardinality growth, a classic and costly production mistake. Fixed by labeling with the route's *path template* (`request.scope["route"].path`, e.g. `/api/v1/tasks/{task_id}`) instead. |
 | **Errors** | Implicit in `api_requests_total`'s `status` label (e.g. `404`) and `worker_tasks_total`'s `status="failure"` via Celery signals | No explicit error-rate *alert rule* is shown anywhere in this repo yet - a raw counter isn't an alert; someone still has to define "error rate > X% over Y minutes" in Prometheus alerting rules / Grafana alerting. |
 | **Saturation** | Not directly instrumented in application code | This is the weakest of the four here - queue depth (Celery/Redis), DB connection pool usage, and CPU/memory saturation would typically come from Redis/Postgres exporters and cAdvisor/kube-state-metrics rather than from the app's own `/metrics`, and none of those exporters are wired into `docker-compose.yml` as of this doc. |
 
@@ -184,6 +184,39 @@ visualization) but do not assume "Prometheus + Grafana are in
 docker-compose.yml" automatically means all four signals are actually
 covered - check, per service, which of the four you can currently answer
 from data versus which require you to eyeball raw logs.
+
+**Two more instrumentation pitfalls worth knowing, both found while
+building the live demo dashboard (`demo/index.html`) and confirmed by
+actually exercising the running stack, not just reading code:**
+
+- **`prometheus_client`'s in-memory registry is per-process, not
+  per-application.** `worker-service` ran Celery's default "prefork"
+  pool, which executes each task in a *forked child process* - but the
+  metrics HTTP server ran in the parent. The `task_success`/`task_failure`
+  signal handlers fired in the child, incrementing a counter the parent's
+  `/metrics` endpoint could never see - `worker_tasks_total` stayed at
+  zero forever, silently. Fixed by switching to `--pool=threads`, which
+  keeps task execution in the same process. The exact same class of bug
+  existed independently in `api-service`: `uvicorn --workers 4` ran 4
+  separate processes, each with its own `tasks_db` and its own
+  `api_requests_total`/`api_request_duration_seconds` - a request could
+  land on any of the 4 at random, so both the task list *and* the metrics
+  looked randomly inconsistent depending on which process served a given
+  request. Fixed to `--workers 1` (see `docs/architecture.md` §6). The
+  general lesson: any in-memory Prometheus metric (or any in-memory state
+  at all) needs a story for what happens across multiple processes/pods -
+  "it worked when I curled it once" does not prove it is process-safe.
+- **CORS headers matter for `/metrics`, not just your main API.**
+  `worker-service` exposed Prometheus metrics via
+  `prometheus_client.start_http_server()`, which sends no CORS headers at
+  all. `curl` doesn't care about CORS, so this passed every manual/curl
+  check - it only breaks when a real browser's `fetch()` tries to read
+  the response body cross-origin, which is exactly what the demo
+  dashboard does. Fixed by replacing `start_http_server()` with
+  `prometheus_client.make_wsgi_app()` wrapped in a small handler that adds
+  `Access-Control-Allow-Origin`. Worth remembering: curl and a browser
+  enforce different rules, and "it works with curl" is not the same claim
+  as "it works from a browser."
 
 ---
 

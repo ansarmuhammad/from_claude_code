@@ -9,6 +9,7 @@ from typing import List, Optional
 from datetime import datetime
 import os
 import uuid
+from celery import Celery
 from prometheus_client import Counter, Histogram, generate_latest
 from fastapi.responses import PlainTextResponse
 import logging
@@ -39,10 +40,16 @@ request_count = Counter('api_requests_total', 'Total API requests', ['method', '
 request_duration = Histogram('api_request_duration_seconds', 'API request duration')
 
 @app.middleware("http")
-async def track_request_duration(request, call_next):
+async def track_request_metrics(request, call_next):
     start_time = time.time()
     response = await call_next(request)
     request_duration.observe(time.time() - start_time)
+    # Label by the route's path template (e.g. "/api/v1/tasks/{task_id}"), not
+    # request.url.path - using the resolved path would create a new
+    # Prometheus time series per unique task id, growing without bound.
+    route = request.scope.get("route")
+    endpoint = route.path if route else request.url.path
+    request_count.labels(method=request.method, endpoint=endpoint, status=str(response.status_code)).inc()
     return response
 
 # Data models
@@ -62,6 +69,13 @@ class HealthCheck(BaseModel):
 
 # In-memory storage (for demo purposes)
 tasks_db = {}
+
+# Celery client used only to dispatch/poll demo background jobs on worker-service
+celery_client = Celery(
+    "api_service_client",
+    broker=os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
+    backend=os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1"),
+)
 
 # Health check endpoint
 @app.get("/health", response_model=HealthCheck)
@@ -93,56 +107,66 @@ async def create_task(task: Task):
     task.created_at = datetime.now()
     task.updated_at = datetime.now()
     tasks_db[task.id] = task
-    
-    request_count.labels(method='POST', endpoint='/api/v1/tasks', status='201').inc()
+
     logger.info(f"Created task: {task.id}")
-    
+
     return task
 
 @app.get("/api/v1/tasks", response_model=List[Task])
 async def get_tasks():
     """Get all tasks"""
-    request_count.labels(method='GET', endpoint='/api/v1/tasks', status='200').inc()
     return list(tasks_db.values())
 
 @app.get("/api/v1/tasks/{task_id}", response_model=Task)
 async def get_task(task_id: str):
     """Get a specific task by ID"""
     if task_id not in tasks_db:
-        request_count.labels(method='GET', endpoint=f'/api/v1/tasks/{task_id}', status='404').inc()
         raise HTTPException(status_code=404, detail="Task not found")
-    
-    request_count.labels(method='GET', endpoint=f'/api/v1/tasks/{task_id}', status='200').inc()
+
     return tasks_db[task_id]
 
 @app.put("/api/v1/tasks/{task_id}", response_model=Task)
 async def update_task(task_id: str, task: Task):
     """Update a task"""
     if task_id not in tasks_db:
-        request_count.labels(method='PUT', endpoint=f'/api/v1/tasks/{task_id}', status='404').inc()
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     task.id = task_id
     task.updated_at = datetime.now()
     tasks_db[task_id] = task
-    
-    request_count.labels(method='PUT', endpoint=f'/api/v1/tasks/{task_id}', status='200').inc()
+
     logger.info(f"Updated task: {task_id}")
-    
+
     return task
 
 @app.delete("/api/v1/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_task(task_id: str):
     """Delete a task"""
     if task_id not in tasks_db:
-        request_count.labels(method='DELETE', endpoint=f'/api/v1/tasks/{task_id}', status='404').inc()
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     del tasks_db[task_id]
-    request_count.labels(method='DELETE', endpoint=f'/api/v1/tasks/{task_id}', status='204').inc()
     logger.info(f"Deleted task: {task_id}")
-    
+
     return None
+
+@app.post("/api/v1/demo/trigger-task")
+async def trigger_demo_task():
+    """Dispatch a real Celery task to worker-service, for the live demo dashboard"""
+    async_result = celery_client.send_task(
+        "worker.process_item", args=[str(uuid.uuid4()), {"source": "demo-dashboard"}]
+    )
+    return {"task_id": async_result.id}
+
+@app.get("/api/v1/demo/task-status/{task_id}")
+async def demo_task_status(task_id: str):
+    """Poll the status/result of a task dispatched via /api/v1/demo/trigger-task"""
+    async_result = celery_client.AsyncResult(task_id)
+    return {
+        "task_id": task_id,
+        "status": async_result.status,
+        "result": async_result.result if async_result.ready() else None,
+    }
 
 # Feature flag endpoint (for demonstrating progressive delivery)
 @app.get("/api/v1/feature-flags")

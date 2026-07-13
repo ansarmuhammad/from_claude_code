@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>See It Live — CI/CD Project Demo</title>
+<style>
+  :root {
+    --bg: #f7f7fb;
+    --card: #ffffff;
+    --text: #1e2130;
+    --muted: #6b7080;
+    --accent: #5b5fef;
+    --accent-soft: #eceafd;
+    --good: #1a9c66;
+    --good-soft: #e4f7ee;
+    --bad: #d33f49;
+    --bad-soft: #fce9ea;
+    --border: #e6e6f0;
+    --code-bg: #f1f1f8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14151f;
+      --card: #1c1e2b;
+      --text: #eceef5;
+      --muted: #9a9db0;
+      --accent: #8b8ef7;
+      --accent-soft: #262a45;
+      --good: #4fd394;
+      --good-soft: #16332a;
+      --bad: #ff7b84;
+      --bad-soft: #3a2024;
+      --border: #2c2f42;
+      --code-bg: #23253590;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 32px 20px 80px; }
+  header.hero { text-align: center; margin-bottom: 28px; }
+  header.hero h1 { font-size: 30px; margin: 0 0 8px; }
+  header.hero p { color: var(--muted); font-size: 17px; margin: 0; }
+
+  .banner {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 16px 18px; margin-bottom: 28px;
+  }
+  .banner .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
+  .banner .dot.good { background: var(--good); }
+  .banner .dot.bad { background: var(--bad); }
+  .banner .msg { flex: 1; font-size: 15px; }
+  .banner button { white-space: nowrap; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 18px; padding: 24px 26px; margin-bottom: 22px;
+  }
+  .card .step-label {
+    display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .04em;
+    color: var(--accent); background: var(--accent-soft); padding: 3px 10px; border-radius: 999px;
+    margin-bottom: 10px; text-transform: uppercase;
+  }
+  .card h2 { margin: 0 0 8px; font-size: 21px; display: flex; align-items: center; gap: 10px; }
+  .card p.explain { color: var(--muted); font-size: 15px; margin: 0 0 16px; }
+  .card p.explain b { color: var(--text); }
+
+  .status-row { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 14px; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+    background: var(--muted); color: white; opacity: .7;
+  }
+  .status-pill.good { background: var(--good-soft); color: var(--good); opacity: 1; }
+  .status-pill.bad { background: var(--bad-soft); color: var(--bad); opacity: 1; }
+  .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+
+  button {
+    font: inherit; font-weight: 600; font-size: 14px;
+    background: var(--accent); color: white; border: none;
+    padding: 10px 18px; border-radius: 10px; cursor: pointer;
+  }
+  button.secondary { background: var(--accent-soft); color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button:hover:not(:disabled) { filter: brightness(1.07); }
+
+  input {
+    font: inherit; font-size: 14px; padding: 9px 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%;
+  }
+  .form-row { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .form-row input { flex: 1; min-width: 140px; }
+
+  .task-list { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .task-list li {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; font-size: 14px;
+  }
+  .task-list li .x { cursor: pointer; color: var(--bad); font-weight: 700; padding: 0 4px; }
+  .task-list .empty { color: var(--muted); font-size: 14px; font-style: italic; }
+
+  .job-log { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; font-size: 14px; }
+  .job-log .line { display: flex; align-items: center; gap: 8px; opacity: 0; transform: translateY(4px); transition: all .25s ease; }
+  .job-log .line.show { opacity: 1; transform: none; }
+  code, pre {
+    background: var(--code-bg); border-radius: 8px; font-size: 12.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  code { padding: 2px 6px; }
+  pre { padding: 12px 14px; overflow-x: auto; margin: 8px 0 0; }
+
+  .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-top: 4px; }
+  .metric-tile { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; text-align: center; }
+  .metric-tile .num { font-size: 30px; font-weight: 700; }
+  .metric-tile .label { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+  .link-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-top: 4px; }
+  .link-card {
+    border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 8px; background: var(--bg);
+  }
+  .link-card .title-row { display: flex; align-items: center; justify-content: space-between; }
+  .link-card .title-row strong { font-size: 14.5px; }
+  .link-card p { margin: 0; font-size: 13px; color: var(--muted); }
+  .link-card a.open { font-size: 13px; font-weight: 600; color: var(--accent); text-decoration: none; }
+
+  iframe.preview {
+    width: 100%; height: 260px; border: 1px solid var(--border); border-radius: 12px; margin-top: 14px; background: var(--bg);
+  }
+
+  footer { text-align: center; color: var(--muted); font-size: 13.5px; margin-top: 8px; }
+  .note { font-size: 13px; color: var(--muted); background: var(--bg); border: 1px dashed var(--border); border-radius: 10px; padding: 10px 12px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <h1>🚀 See It Live</h1>
+    <p>A step-by-step tour of the software actually running on this computer right now.</p>
+  </header>
+
+  <div class="banner">
+    <div class="dot" id="overallDot"></div>
+    <div class="msg" id="overallMsg">Checking whether the project is running…</div>
+    <button class="secondary" onclick="checkAll()">Recheck</button>
+  </div>
+
+  <!-- STEP 1: API -->
+  <div class="card">
+    <span class="step-label">Step 1</span>
+    <h2>🚪 The Front Door — API Service</h2>
+    <p class="explain">Think of this like the <b>front desk of a shop</b>. Every request — "add this", "show me that" — walks through here first.</p>
+    <div class="status-row">
+      <span class="status-pill" id="apiPill"><span class="dot"></span><span>checking…</span></span>
+    </div>
+    <button onclick="sayHello()">👋 Say Hello</button>
+    <div class="note" id="helloResult" style="display:none"></div>
+  </div>
+
+  <!-- STEP 2: Tasks -->
+  <div class="card">
+    <span class="step-label">Step 2</span>
+    <h2>📝 Keeping a To-Do List</h2>
+    <p class="explain">The API can remember simple to-do items for you. In this demo it's a <b>whiteboard, not a filing cabinet</b> — it remembers only while the app keeps running.</p>
+    <div class="form-row">
+      <input id="taskTitle" placeholder="e.g. Buy milk" />
+      <button onclick="addTask()">➕ Add</button>
+    </div>
+    <ul class="task-list" id="taskList"><li class="empty">No tasks yet — add one above.</li></ul>
+  </div>
+
+  <!-- STEP 3: Worker -->
+  <div class="card">
+    <span class="step-label">Step 3</span>
+    <h2>🤖 Sending Work to a Helper</h2>
+    <p class="explain">Some jobs take a while. Instead of making you wait, the front desk hands the job to a separate <b>worker</b> and gets back to you right away. A messenger called <b>Redis</b> carries the job from one to the other.</p>
+    <button id="jobBtn" onclick="runJob()">📨 Send a background job</button>
+    <div class="job-log" id="jobLog"></div>
+  </div>
+
+  <!-- STEP 4: Metrics -->
+  <div class="card">
+    <span class="step-label">Step 4</span>
+    <h2>📊 Counting Everything</h2>
+    <p class="explain">Every single thing that happens gets counted automatically — like the <b>odometer in a car</b>. This is called <i>monitoring</i>, and it's how you'd notice a problem before it becomes a big one.</p>
+    <div class="metric-grid">
+      <div class="metric-tile"><div class="num" id="metricRequests">–</div><div class="label">API requests handled</div></div>
+      <div class="metric-tile"><div class="num" id="metricJobs">–</div><div class="label">Background jobs completed</div></div>
+    </div>
+    <div style="margin-top:14px"><button class="secondary" onclick="refreshMetrics()">🔄 Refresh count</button></div>
+  </div>
+
+  <!-- STEP 5: Dashboards -->
+  <div class="card">
+    <span class="step-label">Step 5</span>
+    <h2>🔭 Looking Under the Hood</h2>
+    <p class="explain">Three specialist tools watch everything happening above. Click any card to open the real thing in a new tab.</p>
+    <div class="link-grid">
+      <div class="link-card">
+        <div class="title-row"><strong>Prometheus</strong><span class="status-pill" id="pillProm"><span class="dot"></span></span></div>
+        <p>The raw numbers, collected every few seconds.</p>
+        <a class="open" href="http://localhost:9090" target="_blank" rel="noopener">Open →</a>
+      </div>
+      <div class="link-card">
+        <div class="title-row"><strong>Grafana</strong><span class="status-pill" id="pillGrafana"><span class="dot"></span></span></div>
+        <p>Pretty charts made from those numbers. Login: admin / admin</p>
+        <a class="open" href="http://localhost:3001" target="_blank" rel="noopener">Open →</a>
+      </div>
+      <div class="link-card">
+        <div class="title-row"><strong>Jaeger</strong><span class="status-pill" id="pillJaeger"><span class="dot"></span></span></div>
+        <p>Tracks one request's whole journey, like a package tracking page.</p>
+        <a class="open" href="http://localhost:16686" target="_blank" rel="noopener">Open →</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 6: Web frontend -->
+  <div class="card">
+    <span class="step-label">Step 6</span>
+    <h2>🖥️ The Actual App</h2>
+    <p class="explain">This is the real webpage a person would use — the same to-do list from Step 2, with a proper visual interface.</p>
+    <div class="status-row">
+      <span class="status-pill" id="pillFrontend"><span class="dot"></span><span>checking…</span></span>
+      <a class="open" href="http://localhost:3000" target="_blank" rel="noopener" style="margin-left:auto">Open full-size →</a>
+    </div>
+    <iframe class="preview" src="http://localhost:3000" title="web-frontend preview"></iframe>
+  </div>
+
+  <!-- STEP 7: Supporting services -->
+  <div class="card">
+    <span class="step-label">Step 7</span>
+    <h2>🧰 Working Quietly in the Background</h2>
+    <p class="explain">Two more pieces are running the whole time, even though they don't have a webpage of their own.</p>
+    <div class="note"><b>Redis</b> — this is the messenger you already saw carry your job to the worker in Step 3. It's doing real work above, right now.</div>
+    <div class="note" style="margin-top:8px"><b>PostgreSQL</b> — a proper long-term filing cabinet, up and running and ready to use. Honest note: this demo's to-do list (Step 2) doesn't save into it yet — it's still on the "whiteboard" (in-memory) — wiring up permanent storage is a natural next step, called out in <code>docs/architecture.md</code>.</div>
+  </div>
+
+  <footer>
+    Everything above is exactly what <code>docker-compose.yml</code> starts, exactly what <code>docs/architecture.md</code> describes,<br/>
+    and exactly what <code>.github/workflows/ci-cd-pipeline.yml</code> builds, tests, and ships automatically on every change.
+  </footer>
+
+</div>
+
+<script>
+const API = "http://localhost:8000";
+const WORKER_METRICS = "http://localhost:9100";
+const PROM = "http://localhost:9090";
+const GRAFANA = "http://localhost:3001";
+const JAEGER = "http://localhost:16686";
+const FRONTEND = "http://localhost:3000";
+
+function withTimeout(promise, ms = 3000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  return { signal: ctrl.signal, clear: () => clearTimeout(t) };
+}
+
+async function pingReachable(url) {
+  // Best-effort "is this port open" check across origins that may not send CORS headers.
+  const { signal, clear } = withTimeout();
+  try {
+    await fetch(url, { mode: "no-cors", signal });
+    clear();
+    return true;
+  } catch (e) {
+    clear();
+    return false;
+  }
+}
+
+function setPill(el, ok, label) {
+  el.className = "status-pill " + (ok ? "good" : "bad");
+  el.querySelector("span:last-child")?.remove();
+  const span = document.createElement("span");
+  span.textContent = label ?? (ok ? "reachable" : "unreachable");
+  el.appendChild(span);
+}
+
+async function checkApi() {
+  const pill = document.getElementById("apiPill");
+  const { signal, clear } = withTimeout();
+  try {
+    const res = await fetch(API + "/health", { signal });
+    clear();
+    if (res.ok) {
+      const data = await res.json();
+      setPill(pill, true, `healthy · v${data.version}`);
+      return true;
+    }
+    setPill(pill, false, "not healthy");
+    return false;
+  } catch (e) {
+    clear();
+    setPill(pill, false, "not reachable — is docker compose up?");
+    return false;
+  }
+}
+
+async function checkFrontend() {
+  const pill = document.getElementById("pillFrontend");
+  const ok = await pingReachable(FRONTEND);
+  setPill(pill, ok, ok ? "running" : "not reachable");
+  return ok;
+}
+
+async function checkAll() {
+  document.getElementById("overallMsg").textContent = "Checking…";
+  const [api, frontend] = await Promise.all([
+    checkApi(),
+    checkFrontend(),
+    pingReachable(PROM).then(ok => setPill(document.getElementById("pillProm"), ok, "")),
+    pingReachable(GRAFANA).then(ok => setPill(document.getElementById("pillGrafana"), ok, "")),
+    pingReachable(JAEGER).then(ok => setPill(document.getElementById("pillJaeger"), ok, "")),
+  ]);
+  const dot = document.getElementById("overallDot");
+  const msg = document.getElementById("overallMsg");
+  if (api) {
+    dot.className = "dot good";
+    msg.textContent = "✅ The project is up and running — try the steps below!";
+  } else {
+    dot.className = "dot bad";
+    msg.textContent = "⚠️ The API isn't reachable. Open a terminal in the project folder and run: docker compose up -d";
+  }
+  refreshMetrics();
+  refreshTasks();
+}
+
+async function sayHello() {
+  const box = document.getElementById("helloResult");
+  box.style.display = "block";
+  box.textContent = "Asking the API…";
+  try {
+    const res = await fetch(API + "/");
+    const data = await res.json();
+    box.textContent = `The API said: "${data.message}"`;
+  } catch (e) {
+    box.textContent = "Couldn't reach the API. Is docker compose up?";
+  }
+}
+
+async function refreshTasks() {
+  const list = document.getElementById("taskList");
+  try {
+    const res = await fetch(API + "/api/v1/tasks");
+    const tasks = await res.json();
+    if (!tasks.length) {
+      list.innerHTML = '<li class="empty">No tasks yet — add one above.</li>';
+      return;
+    }
+    list.innerHTML = tasks.map(t => `
+      <li>
+        <span>${t.title}</span>
+        <span class="x" onclick="deleteTask('${t.id}')">✕</span>
+      </li>`).join("");
+  } catch (e) {
+    list.innerHTML = '<li class="empty">Couldn\'t reach the API.</li>';
+  }
+}
+
+async function addTask() {
+  const input = document.getElementById("taskTitle");
+  const title = input.value.trim();
+  if (!title) return;
+  await fetch(API + "/api/v1/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, description: "Added from the demo dashboard" }),
+  });
+  input.value = "";
+  refreshTasks();
+  refreshMetrics();
+}
+
+async function deleteTask(id) {
+  await fetch(API + "/api/v1/tasks/" + id, { method: "DELETE" });
+  refreshTasks();
+  refreshMetrics();
+}
+
+function addLogLine(text) {
+  const log = document.getElementById("jobLog");
+  const div = document.createElement("div");
+  div.className = "line";
+  div.textContent = text;
+  log.appendChild(div);
+  requestAnimationFrame(() => div.classList.add("show"));
+}
+
+async function runJob() {
+  const btn = document.getElementById("jobBtn");
+  const log = document.getElementById("jobLog");
+  log.innerHTML = "";
+  btn.disabled = true;
+  addLogLine("📨 Job sent to the API…");
+  try {
+    const res = await fetch(API + "/api/v1/demo/trigger-task", { method: "POST" });
+    const { task_id } = await res.json();
+    addLogLine(`✉️ Handed to Redis, picked up by the worker (job id: ${task_id.slice(0, 8)}…)`);
+    addLogLine("⏳ Worker is processing it (about 2 seconds)…");
+    const started = Date.now();
+    while (Date.now() - started < 15000) {
+      await new Promise(r => setTimeout(r, 500));
+      const statusRes = await fetch(API + "/api/v1/demo/task-status/" + task_id);
+      const statusData = await statusRes.json();
+      if (statusData.status === "SUCCESS") {
+        addLogLine("✅ Done! Here's what the worker sent back:");
+        const pre = document.createElement("pre");
+        pre.textContent = JSON.stringify(statusData.result, null, 2);
+        log.appendChild(pre);
+        break;
+      }
+      if (statusData.status === "FAILURE") {
+        addLogLine("❌ The job failed.");
+        break;
+      }
+    }
+  } catch (e) {
+    addLogLine("❌ Couldn't reach the API. Is docker compose up?");
+  } finally {
+    btn.disabled = false;
+    refreshMetrics();
+  }
+}
+
+function sumMetric(text, name) {
+  const re = new RegExp(`^${name}(\\{[^}]*\\})? ([0-9.e+-]+)$`, "gm");
+  let m, total = 0, found = false;
+  while ((m = re.exec(text)) !== null) { total += parseFloat(m[2]); found = true; }
+  return found ? total : null;
+}
+
+async function refreshMetrics() {
+  try {
+    const res = await fetch(API + "/metrics");
+    const text = await res.text();
+    const total = sumMetric(text, "api_requests_total");
+    document.getElementById("metricRequests").textContent = total === null ? "–" : Math.round(total);
+  } catch (e) {
+    document.getElementById("metricRequests").textContent = "–";
+  }
+  try {
+    const res = await fetch(WORKER_METRICS + "/metrics");
+    const text = await res.text();
+    const total = sumMetric(text, "worker_tasks_total");
+    document.getElementById("metricJobs").textContent = total === null ? "–" : Math.round(total);
+  } catch (e) {
+    document.getElementById("metricJobs").textContent = "–";
+  }
+}
+
+checkAll();
+</script>
+</body>
+</html>

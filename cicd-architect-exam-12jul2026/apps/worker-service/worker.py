@@ -4,12 +4,14 @@ Part of CI/CD Practice Project
 """
 import logging
 import os
+import threading
 import time
+from wsgiref.simple_server import make_server
 
 from celery import Celery
 from celery.signals import task_failure, task_prerun, task_success, worker_ready
 from pythonjsonlogger import jsonlogger
-from prometheus_client import Counter, Histogram, start_http_server
+from prometheus_client import Counter, Histogram, make_wsgi_app
 
 # JSON logging configuration
 logger = logging.getLogger("worker-service")
@@ -68,10 +70,24 @@ def on_task_failure(sender=None, **kwargs):
     task_count.labels(task_name=task_name, status="failure").inc()
 
 
+def _cors_enabled_metrics_app(environ, start_response):
+    # prometheus_client's own start_http_server() sends no CORS headers, which
+    # silently blocks browser-based fetch() reads (curl doesn't care, so this
+    # only shows up when something in a real browser tries to read /metrics).
+    metrics_app = make_wsgi_app()
+
+    def start_response_with_cors(status, headers, exc_info=None):
+        headers = headers + [("Access-Control-Allow-Origin", "*")]
+        return start_response(status, headers, exc_info)
+
+    return metrics_app(environ, start_response_with_cors)
+
+
 @worker_ready.connect
 def on_worker_ready(**kwargs):
     metrics_port = int(os.getenv("METRICS_PORT", "9100"))
-    start_http_server(metrics_port)
+    httpd = make_server("", metrics_port, _cors_enabled_metrics_app)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
     logger.info("Prometheus metrics server started", extra={"port": metrics_port})
 
 

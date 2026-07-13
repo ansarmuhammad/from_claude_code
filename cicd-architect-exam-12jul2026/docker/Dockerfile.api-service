@@ -54,5 +54,12 @@ LABEL maintainer="DevOps Team" \
       version="1.0.0" \
       description="API Service for CI/CD Practice"
 
-# Run the application
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# A single worker process is required, not just faster: tasks_db and the
+# Prometheus counters/histograms are plain in-memory objects with no shared
+# store between processes. With --workers > 1, each request lands on one of
+# several independent uvicorn processes at random, so a task created on one
+# worker can look "missing" on a GET routed to another, and /metrics reflects
+# whichever process happened to serve that request. A real deployment would
+# back tasks_db with Postgres/Redis and use prometheus_client's multiprocess
+# mode (or scale via multiple pods, not multiple workers in one process).
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

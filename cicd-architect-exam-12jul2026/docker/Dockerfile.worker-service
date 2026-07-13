@@ -55,5 +55,9 @@ LABEL maintainer="DevOps Team" \
       version="1.0.0" \
       description="Worker Service for CI/CD Practice"
 
-# Run the Celery worker
-CMD ["celery", "-A", "worker", "worker", "--loglevel=info"]
+# --pool=threads keeps task execution in this same process (no forked child
+# processes) so the in-memory Prometheus counters/histograms updated by the
+# task_success/task_failure signal handlers stay visible to the metrics
+# HTTP server, which also runs in this process. The default "prefork" pool
+# forks a child per task, silently orphaning those metrics from the parent.
+CMD ["celery", "-A", "worker", "worker", "--loglevel=info", "--pool=threads"]

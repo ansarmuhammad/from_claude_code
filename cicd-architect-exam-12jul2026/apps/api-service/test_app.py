@@ -1,8 +1,11 @@
 """
 Unit tests for API Service
 """
+from unittest.mock import MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
+import app as app_module
 from app import app
 
 client = TestClient(app)
@@ -127,6 +130,42 @@ def test_metrics_endpoint():
     response = client.get("/metrics")
     assert response.status_code == 200
     assert "api_requests_total" in response.text
+
+def test_trigger_demo_task(monkeypatch):
+    """Test dispatching a demo background task returns the Celery task id"""
+    fake_async_result = MagicMock(id="fake-task-id")
+    fake_send_task = MagicMock(return_value=fake_async_result)
+    monkeypatch.setattr(app_module.celery_client, "send_task", fake_send_task)
+
+    response = client.post("/api/v1/demo/trigger-task")
+    assert response.status_code == 200
+    assert response.json() == {"task_id": "fake-task-id"}
+    fake_send_task.assert_called_once()
+    assert fake_send_task.call_args[0][0] == "worker.process_item"
+
+def test_demo_task_status_pending(monkeypatch):
+    """Test polling a task that hasn't completed yet"""
+    fake_result = MagicMock(status="PENDING", result=None)
+    fake_result.ready.return_value = False
+    monkeypatch.setattr(app_module.celery_client, "AsyncResult", lambda task_id: fake_result)
+
+    response = client.get("/api/v1/demo/task-status/fake-task-id")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "PENDING"
+    assert data["result"] is None
+
+def test_demo_task_status_success(monkeypatch):
+    """Test polling a task that has completed successfully"""
+    fake_result = MagicMock(status="SUCCESS", result={"item_id": "x", "status": "processed"})
+    fake_result.ready.return_value = True
+    monkeypatch.setattr(app_module.celery_client, "AsyncResult", lambda task_id: fake_result)
+
+    response = client.get("/api/v1/demo/task-status/fake-task-id")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "SUCCESS"
+    assert data["result"] == {"item_id": "x", "status": "processed"}
 
 def test_feature_flags():
     """Test feature flags endpoint"""

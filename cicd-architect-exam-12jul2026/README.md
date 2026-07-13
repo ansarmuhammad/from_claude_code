@@ -18,6 +18,8 @@ environment for CI/CD and cloud architecture exam prep — start with
 cicd-architect-exam-12jul2026/
 ├── README.md
 ├── docker-compose.yml            # Full local dev stack (all services + observability)
+├── demo/
+│   └── index.html                # Live, plain-language demo dashboard (see scripts/demo.sh)
 ├── apps/
 │   ├── api-service/              # FastAPI REST API (Task CRUD), Prometheus metrics
 │   ├── worker-service/           # Celery background worker (Redis broker)
@@ -51,7 +53,8 @@ cicd-architect-exam-12jul2026/
 │   ├── deploy.sh                 # Deploy to dev/staging/production (blue/green aware)
 │   ├── rollback.sh               # kubectl rollout undo, confirmation-gated for prod
 │   ├── setup-local-env.sh        # Bootstrap .env + docker-compose up
-│   └── run-tests.sh              # Unit (+ --integration/--e2e/--perf flags)
+│   ├── run-tests.sh              # Unit (+ --integration/--e2e/--perf flags)
+│   └── demo.sh                   # Serves demo/index.html at localhost:8090
 ├── tests/
 │   ├── integration/              # pytest + httpx against a running api-service
 │   ├── e2e/                      # Playwright against web-frontend
@@ -127,6 +130,18 @@ docker-compose up -d
 ./scripts/run-tests.sh              # unit tests only
 ./scripts/run-tests.sh --all        # + integration, e2e, performance
 ```
+
+### Live Demo Dashboard
+```bash
+docker-compose up -d      # make sure the stack is running first
+./scripts/demo.sh         # opens http://localhost:8090
+```
+A single page that walks through every running piece step-by-step, in plain
+language: pings the API, lets you add/delete a to-do item, dispatches a real
+background job to the worker via Redis and watches it complete, shows live
+request/job counts pulled straight from Prometheus-format metrics, links out
+to Prometheus/Grafana/Jaeger, and previews the actual web-frontend. See
+`demo/index.html`.
 
 ### Kubernetes
 ```bash

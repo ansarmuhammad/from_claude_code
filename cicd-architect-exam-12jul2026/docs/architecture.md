@@ -198,6 +198,17 @@ overhead of a dozen repos.
   this with Postgres). Once backed by Postgres, api-service scales
   horizontally behind the Kubernetes Service/Ingress with no special
   coordination needed.
+
+  This in-memory-state limitation isn't just theoretical: `Dockerfile.api-service`
+  originally ran `uvicorn --workers 4`, spawning 4 independent OS processes
+  in the *same* container, each with its own copy of `tasks_db` and its own
+  Prometheus counters. A task created via a request landed on process A
+  would appear to vanish on a GET routed to process B, and `/metrics` would
+  reflect whichever single process happened to serve that particular
+  request. Fixed to `--workers 1` for now, with the tradeoff documented
+  inline in the Dockerfile - the real fix is backing `tasks_db` with
+  Postgres and using `prometheus_client`'s multiprocess mode, not avoiding
+  concurrency altogether.
 - **worker-service**: scales by **queue depth**, not CPU/request rate -
   the right autoscaling signal is Celery queue length (or Redis list
   length) rather than raw CPU, since a worker can be CPU-idle while a
