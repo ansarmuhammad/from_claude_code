@@ -2,29 +2,65 @@
 API Service - FastAPI Microservice
 Part of CI/CD Practice Project
 """
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 from datetime import datetime
 import os
 import uuid
+import httpx
 from celery import Celery
+from opentelemetry.instrumentation.celery import CeleryInstrumentor
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from prometheus_client import Counter, Histogram, generate_latest
 from fastapi.responses import PlainTextResponse
 import logging
 import time
 
+from database import Base, engine, get_db
+from models import TaskRecord
+from tracing import setup_tracing
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+setup_tracing("api-service")
+CeleryInstrumentor().instrument()
+SQLAlchemyInstrumentor().instrument(engine=engine.sync_engine)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Postgres may not accept connections the instant this process starts
+    # even with a compose healthcheck-based depends_on, so retry briefly
+    # instead of crashing on the first attempt.
+    for attempt in range(1, 6):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            break
+        except Exception as exc:
+            logger.warning(f"Database not ready (attempt {attempt}/5): {exc}")
+            await asyncio.sleep(2)
+    yield
+
 
 # Initialize FastAPI
 app = FastAPI(
     title="API Service",
     description="Sample microservice for CI/CD practice",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
+FastAPIInstrumentor.instrument_app(app)
 
 # CORS configuration
 app.add_middleware(
@@ -54,6 +90,8 @@ async def track_request_metrics(request, call_next):
 
 # Data models
 class Task(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: Optional[str] = None
     title: str
     description: str
@@ -66,9 +104,6 @@ class HealthCheck(BaseModel):
     version: str
     timestamp: datetime
     environment: str
-
-# In-memory storage (for demo purposes)
-tasks_db = {}
 
 # Celery client used only to dispatch/poll demo background jobs on worker-service
 celery_client = Celery(
@@ -101,51 +136,69 @@ async def root():
     return {"message": "API Service Running", "docs": "/docs"}
 
 @app.post("/api/v1/tasks", response_model=Task, status_code=status.HTTP_201_CREATED)
-async def create_task(task: Task):
+async def create_task(task: Task, db: AsyncSession = Depends(get_db)):
     """Create a new task"""
     task.id = str(uuid.uuid4())
     task.created_at = datetime.now()
     task.updated_at = datetime.now()
-    tasks_db[task.id] = task
+
+    record = TaskRecord(
+        id=task.id,
+        title=task.title,
+        description=task.description,
+        status=task.status,
+        created_at=task.created_at,
+        updated_at=task.updated_at,
+    )
+    db.add(record)
+    await db.commit()
 
     logger.info(f"Created task: {task.id}")
 
     return task
 
 @app.get("/api/v1/tasks", response_model=List[Task])
-async def get_tasks():
+async def get_tasks(db: AsyncSession = Depends(get_db)):
     """Get all tasks"""
-    return list(tasks_db.values())
+    result = await db.execute(select(TaskRecord))
+    return result.scalars().all()
 
 @app.get("/api/v1/tasks/{task_id}", response_model=Task)
-async def get_task(task_id: str):
+async def get_task(task_id: str, db: AsyncSession = Depends(get_db)):
     """Get a specific task by ID"""
-    if task_id not in tasks_db:
+    record = await db.get(TaskRecord, task_id)
+    if record is None:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    return tasks_db[task_id]
+    return record
 
 @app.put("/api/v1/tasks/{task_id}", response_model=Task)
-async def update_task(task_id: str, task: Task):
+async def update_task(task_id: str, task: Task, db: AsyncSession = Depends(get_db)):
     """Update a task"""
-    if task_id not in tasks_db:
+    record = await db.get(TaskRecord, task_id)
+    if record is None:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    task.id = task_id
-    task.updated_at = datetime.now()
-    tasks_db[task_id] = task
+    record.title = task.title
+    record.description = task.description
+    record.status = task.status
+    record.updated_at = datetime.now()
+    await db.commit()
+    await db.refresh(record)
 
     logger.info(f"Updated task: {task_id}")
 
-    return task
+    return record
 
 @app.delete("/api/v1/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_task(task_id: str):
+async def delete_task(task_id: str, db: AsyncSession = Depends(get_db)):
     """Delete a task"""
-    if task_id not in tasks_db:
+    record = await db.get(TaskRecord, task_id)
+    if record is None:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    del tasks_db[task_id]
+    await db.delete(record)
+    await db.commit()
     logger.info(f"Deleted task: {task_id}")
 
     return None
@@ -167,6 +220,41 @@ async def demo_task_status(task_id: str):
         "status": async_result.status,
         "result": async_result.result if async_result.ready() else None,
     }
+
+@app.get("/api/v1/demo/db-check")
+async def demo_db_check(db: AsyncSession = Depends(get_db)):
+    """Prove tasks are really persisted in the database, for the live demo dashboard"""
+    result = await db.execute(select(func.count()).select_from(TaskRecord))
+    return {
+        "database": db.bind.dialect.name,
+        "table": "tasks",
+        "row_count": result.scalar_one(),
+    }
+
+@app.get("/api/v1/demo/trace-check")
+async def demo_trace_check():
+    """Prove real distributed traces reached Jaeger, for the live demo dashboard.
+
+    Proxied server-side (not called directly from the browser) because
+    Jaeger's own API sends no CORS headers - a browser fetch() straight to
+    it would be silently blocked, same class of issue as worker-service's
+    /metrics before that was fixed.
+    """
+    jaeger_url = os.getenv("JAEGER_QUERY_URL", "http://jaeger:16686")
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        services_resp = await client.get(f"{jaeger_url}/api/services")
+        services = services_resp.json().get("data") or []
+
+        recent_spans = 0
+        if "api-service" in services:
+            traces_resp = await client.get(
+                f"{jaeger_url}/api/traces", params={"service": "api-service", "limit": 1}
+            )
+            traces = traces_resp.json().get("data") or []
+            if traces:
+                recent_spans = len(traces[0]["spans"])
+
+    return {"traced_services": services, "most_recent_trace_span_count": recent_spans}
 
 # Feature flag endpoint (for demonstrating progressive delivery)
 @app.get("/api/v1/feature-flags")

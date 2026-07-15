@@ -10,8 +10,11 @@ from wsgiref.simple_server import make_server
 
 from celery import Celery
 from celery.signals import task_failure, task_prerun, task_success, worker_ready
+from opentelemetry.instrumentation.celery import CeleryInstrumentor
 from pythonjsonlogger import jsonlogger
 from prometheus_client import Counter, Histogram, make_wsgi_app
+
+from tracing import setup_tracing
 
 # JSON logging configuration
 logger = logging.getLogger("worker-service")
@@ -19,6 +22,9 @@ logger.setLevel(logging.INFO)
 log_handler = logging.StreamHandler()
 log_handler.setFormatter(jsonlogger.JsonFormatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
 logger.addHandler(log_handler)
+
+setup_tracing("worker-service")
+CeleryInstrumentor().instrument()
 
 # Celery configuration from env vars
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")

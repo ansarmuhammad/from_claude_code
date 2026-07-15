@@ -216,9 +216,13 @@
       </div>
       <div class="link-card">
         <div class="title-row"><strong>Jaeger</strong><span class="status-pill" id="pillJaeger"><span class="dot"></span></span></div>
-        <p>Tracks one request's whole journey, like a package tracking page.</p>
+        <p>Tracks one request's whole journey — including crossing from the API into the worker in Step 3 — like a package tracking page.</p>
         <a class="open" href="http://localhost:16686" target="_blank" rel="noopener">Open →</a>
       </div>
+    </div>
+    <div style="margin-top:14px">
+      <button class="secondary" onclick="checkTraces()">🔍 Prove it — check for real traces</button>
+      <div id="traceCheckResult" style="margin-top:10px; display:none" class="note"></div>
     </div>
   </div>
 
@@ -240,7 +244,11 @@
     <h2>🧰 Working Quietly in the Background</h2>
     <p class="explain">Two more pieces are running the whole time, even though they don't have a webpage of their own.</p>
     <div class="note"><b>Redis</b> — this is the messenger you already saw carry your job to the worker in Step 3. It's doing real work above, right now.</div>
-    <div class="note" style="margin-top:8px"><b>PostgreSQL</b> — a proper long-term filing cabinet, up and running and ready to use. Honest note: this demo's to-do list (Step 2) doesn't save into it yet — it's still on the "whiteboard" (in-memory) — wiring up permanent storage is a natural next step, called out in <code>docs/architecture.md</code>.</div>
+    <div class="note" style="margin-top:8px">
+      <b>PostgreSQL</b> — a proper long-term filing cabinet. The to-do list from Step 2 is genuinely saved in here now, not just remembered in memory — restart the API and your tasks will still be there.
+      <div style="margin-top:10px"><button class="secondary" onclick="checkDb()">🔍 Prove it — check the database</button></div>
+      <div id="dbCheckResult" style="margin-top:10px; display:none"></div>
+    </div>
   </div>
 
   <footer>
@@ -454,6 +462,36 @@ async function refreshMetrics() {
     document.getElementById("metricJobs").textContent = total === null ? "–" : Math.round(total);
   } catch (e) {
     document.getElementById("metricJobs").textContent = "–";
+  }
+}
+
+async function checkDb() {
+  const box = document.getElementById("dbCheckResult");
+  box.style.display = "block";
+  box.textContent = "Asking Postgres directly…";
+  try {
+    const res = await fetch(API + "/api/v1/demo/db-check");
+    const data = await res.json();
+    box.textContent = `✅ Checked the "${data.table}" table in ${data.database} directly — it really has ${data.row_count} row(s) in it, matching your to-do list above.`;
+  } catch (e) {
+    box.textContent = "Couldn't reach the API. Is docker compose up?";
+  }
+}
+
+async function checkTraces() {
+  const box = document.getElementById("traceCheckResult");
+  box.style.display = "block";
+  box.textContent = "Asking Jaeger directly (through the API, since Jaeger's own API doesn't allow browser requests)…";
+  try {
+    const res = await fetch(API + "/api/v1/demo/trace-check");
+    const data = await res.json();
+    if (!data.traced_services.length) {
+      box.textContent = "No traces yet — try Step 2 or Step 3 above first, then check again.";
+      return;
+    }
+    box.textContent = `✅ Jaeger has real traces from: ${data.traced_services.join(", ")}. The most recent trace has ${data.most_recent_trace_span_count} spans — open Jaeger above and search for "api-service" to see one request's whole journey, including the handoff into the worker.`;
+  } catch (e) {
+    box.textContent = "Couldn't reach the API. Is docker compose up?";
   }
 }
 

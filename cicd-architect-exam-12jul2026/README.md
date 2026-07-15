@@ -77,10 +77,13 @@ cicd-architect-exam-12jul2026/
 - **web-frontend** — React/TypeScript SPA that lists/creates tasks against api-service
   and surfaces a health indicator.
 
-Data stores: PostgreSQL (task persistence contract — the demo app currently
-keeps tasks in memory, see `docs/architecture.md` for the caveat), Redis
-(Celery broker/result backend). Jaeger is wired into `docker-compose.yml`
-for distributed tracing.
+Data stores: PostgreSQL (real task persistence via async SQLAlchemy +
+asyncpg — see `apps/api-service/database.py`/`models.py`), Redis (Celery
+broker/result backend). Both services are instrumented with OpenTelemetry,
+exporting real distributed traces to Jaeger (FastAPI, Celery producer/consumer,
+and SQLAlchemy query spans, connected across the api-service ↔ worker-service
+boundary) — see `docs/exam-prep-notes.md` §4 for how this was verified and
+its one caveat (Jaeger's in-memory trace storage doesn't survive a restart).
 
 ### CI/CD Pipeline (`.github/workflows/ci-cd-pipeline.yml`)
 1. **Code quality** — Black, Flake8, MyPy, Bandit, Safety
@@ -137,11 +140,12 @@ docker-compose up -d      # make sure the stack is running first
 ./scripts/demo.sh         # opens http://localhost:8090
 ```
 A single page that walks through every running piece step-by-step, in plain
-language: pings the API, lets you add/delete a to-do item, dispatches a real
+language: pings the API, lets you add/delete a to-do item (genuinely saved
+in Postgres — a button proves it with a live row count), dispatches a real
 background job to the worker via Redis and watches it complete, shows live
 request/job counts pulled straight from Prometheus-format metrics, links out
-to Prometheus/Grafana/Jaeger, and previews the actual web-frontend. See
-`demo/index.html`.
+to Prometheus/Grafana/Jaeger (with a button proving real distributed traces
+reached Jaeger), and previews the actual web-frontend. See `demo/index.html`.
 
 ### Kubernetes
 ```bash

@@ -1,12 +1,43 @@
 """
 Unit tests for API Service
+
+These run against an isolated in-memory SQLite database, not the real
+Postgres from docker-compose.yml, so they stay fast and dependency-free -
+matching the "unit-tests" CI job, which does not spin up a database
+service (see tests/integration/ for tests against the real Postgres).
 """
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
 import app as app_module
 from app import app
+from database import Base, get_db
+
+test_engine = create_async_engine(
+    "sqlite+aiosqlite:///:memory:",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestSessionLocal = async_sessionmaker(test_engine, expire_on_commit=False)
+
+
+async def _override_get_db():
+    async with TestSessionLocal() as session:
+        yield session
+
+
+async def _create_tables():
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+asyncio.run(_create_tables())
+app.dependency_overrides[get_db] = _override_get_db
 
 client = TestClient(app)
 
@@ -166,6 +197,56 @@ def test_demo_task_status_success(monkeypatch):
     data = response.json()
     assert data["status"] == "SUCCESS"
     assert data["result"] == {"item_id": "x", "status": "processed"}
+
+def test_demo_db_check_reflects_created_tasks():
+    """Test the live DB-check endpoint reports a real row count from the tasks table"""
+    before = client.get("/api/v1/demo/db-check").json()["row_count"]
+
+    task_data = {"title": "DB check task", "description": "counted", "status": "pending"}
+    create_response = client.post("/api/v1/tasks", json=task_data)
+    task_id = create_response.json()["id"]
+
+    after = client.get("/api/v1/demo/db-check")
+    assert after.status_code == 200
+    data = after.json()
+    assert data["database"] == "sqlite"
+    assert data["table"] == "tasks"
+    assert data["row_count"] == before + 1
+
+    client.delete(f"/api/v1/tasks/{task_id}")
+
+def test_trace_check_reports_services_and_span_count(monkeypatch):
+    """Test the trace-check endpoint reports Jaeger's known services and span count"""
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url, params=None):
+            if url.endswith("/api/services"):
+                return FakeResponse({"data": ["api-service", "worker-service"]})
+            return FakeResponse({"data": [{"spans": [1, 2, 3]}]})
+
+    monkeypatch.setattr(app_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.get("/api/v1/demo/trace-check")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["traced_services"] == ["api-service", "worker-service"]
+    assert data["most_recent_trace_span_count"] == 3
 
 def test_feature_flags():
     """Test feature flags endpoint"""

@@ -41,10 +41,15 @@ dev/staging/production.
                                           │  PostgreSQL (shared)  │
                                           └───────────────────────┘
 
-        Cross-cutting observability (scrapes all three services' /metrics):
-        ┌────────────┐   ┌──────────┐   ┌─────────┐
-        │ Prometheus  │──▶│ Grafana   │   │ Jaeger   │  (tracing, local only)
-        └────────────┘   └──────────┘   └─────────┘
+        Cross-cutting observability:
+        ┌────────────┐   ┌──────────┐   ┌──────────────────────────────┐
+        │ Prometheus  │──▶│ Grafana   │   │ Jaeger - receives real OTLP  │
+        │ (scrapes    │   └──────────┘   │ traces from api-service AND │
+        │  /metrics)  │                  │ worker-service (connected    │
+        └────────────┘                  │ across the Celery/Redis hop);│
+                                          │ in-memory storage, so history│
+                                          │ is lost on container restart │
+                                          └──────────────────────────────┘
 ```
 
 Equivalent Mermaid form (renders in any Mermaid-aware viewer):
@@ -60,6 +65,8 @@ flowchart LR
     Api -.->|/metrics| Prom[Prometheus]
     Worker -.->|/metrics :9100| Prom
     Prom --> Graf[Grafana]
+    Api -.->|OTLP traces| Jaeger[Jaeger]
+    Worker -.->|OTLP traces| Jaeger
 ```
 
 ## 2. The three services
@@ -190,25 +197,34 @@ overhead of a dozen repos.
 
 ## 6. Scaling considerations
 
-- **api-service**: stateless (task state lives in Postgres, not in
-  process memory in a real deployment - note the current `app.py` actually
-  keeps `tasks_db` as an in-memory dict, which is fine for a demo but means
-  today's implementation does **not** survive a pod restart or scale past
-  one replica without losing consistency; a real implementation would back
-  this with Postgres). Once backed by Postgres, api-service scales
-  horizontally behind the Kubernetes Service/Ingress with no special
-  coordination needed.
+- **api-service**: stateless. Task state lives in Postgres
+  (`apps/api-service/database.py` + `models.py`, an async SQLAlchemy
+  engine talking to the `postgres` container via `asyncpg`) rather than in
+  process memory - a task survives an api-service restart and would
+  survive scaling to multiple replicas/pods, since all instances share the
+  one Postgres database. Table creation currently happens via
+  `Base.metadata.create_all()` in the app's `lifespan` startup handler
+  (with a short retry loop for the case where Postgres's container has
+  started but isn't yet accepting connections) rather than versioned
+  migrations - fine for this practice project, but a real system would use
+  Alembic so schema changes are reviewable and reversible instead of
+  implicit. Once backed by Postgres, api-service scales horizontally
+  behind the Kubernetes Service/Ingress with no special coordination
+  needed.
 
-  This in-memory-state limitation isn't just theoretical: `Dockerfile.api-service`
-  originally ran `uvicorn --workers 4`, spawning 4 independent OS processes
-  in the *same* container, each with its own copy of `tasks_db` and its own
-  Prometheus counters. A task created via a request landed on process A
-  would appear to vanish on a GET routed to process B, and `/metrics` would
-  reflect whichever single process happened to serve that particular
-  request. Fixed to `--workers 1` for now, with the tradeoff documented
-  inline in the Dockerfile - the real fix is backing `tasks_db` with
-  Postgres and using `prometheus_client`'s multiprocess mode, not avoiding
-  concurrency altogether.
+  Before this was wired up, `tasks_db` was a plain in-memory dict, and
+  that in-memory-state problem was not just theoretical:
+  `Dockerfile.api-service` originally ran `uvicorn --workers 4`, spawning
+  4 independent OS processes in the *same* container, each with its own
+  copy of `tasks_db` and its own Prometheus counters. A task created via a
+  request landed on process A would appear to vanish on a GET routed to
+  process B, and `/metrics` would reflect whichever single process
+  happened to serve that particular request. Fixed to `--workers 1` at
+  the time; now that task state itself lives in Postgres rather than
+  per-process memory, that constraint is specifically about the
+  Prometheus counters/histograms (still per-process, still not
+  multiprocess-safe) - a real fix there would use
+  `prometheus_client`'s multiprocess mode, not just `--workers 1`.
 - **worker-service**: scales by **queue depth**, not CPU/request rate -
   the right autoscaling signal is Celery queue length (or Redis list
   length) rather than raw CPU, since a worker can be CPU-idle while a

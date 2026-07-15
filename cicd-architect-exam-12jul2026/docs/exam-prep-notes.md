@@ -175,6 +175,43 @@ both expose Prometheus metrics.
 | **Errors** | Implicit in `api_requests_total`'s `status` label (e.g. `404`) and `worker_tasks_total`'s `status="failure"` via Celery signals | No explicit error-rate *alert rule* is shown anywhere in this repo yet - a raw counter isn't an alert; someone still has to define "error rate > X% over Y minutes" in Prometheus alerting rules / Grafana alerting. |
 | **Saturation** | Not directly instrumented in application code | This is the weakest of the four here - queue depth (Celery/Redis), DB connection pool usage, and CPU/memory saturation would typically come from Redis/Postgres exporters and cAdvisor/kube-state-metrics rather than from the app's own `/metrics`, and none of those exporters are wired into `docker-compose.yml` as of this doc. |
 
+**Distributed tracing: from an idle container to real, connected traces.**
+Jaeger was running in `docker-compose.yml` from the start, but nothing
+ever sent it a trace - `curl http://localhost:16686/api/services`
+returned only `jaeger-all-in-one` (itself). Worth internalizing as its
+own lesson: *a monitoring tool being present and healthy in
+`docker-compose.yml` proves nothing about whether it's actually
+receiving data* - the same category of gap as the Postgres container
+that was healthy but never queried, before task persistence was wired
+up (§ above / `docs/architecture.md`).
+
+Fixed by instrumenting both services with OpenTelemetry
+(`opentelemetry-instrumentation-fastapi`, `-celery`, `-sqlalchemy`),
+exporting via OTLP/HTTP to Jaeger's `4317`/`4318` receivers - ports that
+had to be *added* to `docker-compose.yml`, since Jaeger's `all-in-one`
+image only exposed its legacy Thrift/Zipkin ports before that. The
+payoff: a single trace ID now genuinely spans both services -
+api-service's `POST /api/v1/demo/trigger-task` and its `apply_async`
+span, connected through Celery/Redis to worker-service's
+`run/worker.process_item` span - real distributed trace context
+propagation, not two independent traces that happen to look related.
+The Postgres `INSERT` from creating a task shows up as its own span
+too, via the SQLAlchemy instrumentation.
+
+Two things worth flagging honestly:
+1. `demo/index.html`'s "check for real traces" button doesn't call
+   Jaeger's API directly from the browser - Jaeger's HTTP API sends no
+   CORS headers, so a direct browser `fetch()` would be silently
+   blocked (same class of bug as worker-service's `/metrics` before
+   that was fixed). It's proxied server-side instead, through a new
+   `GET /api/v1/demo/trace-check` endpoint on api-service.
+2. Jaeger's `all-in-one` image stores traces **in memory** by default -
+   restart the `jaeger` container (or the whole stack) and all trace
+   history is gone, even though Postgres data survives via its volume.
+   A real deployment would point Jaeger at Elasticsearch/Cassandra, or
+   at minimum enable its on-disk Badger storage, for persistence across
+   restarts.
+
 **Exam framing**: the four golden signals (Google SRE book: latency,
 traffic, errors, saturation) are a *minimum checklist* for whether a
 service is observable enough to run an on-call rotation against. This
@@ -198,14 +235,20 @@ actually exercising the running stack, not just reading code:**
   zero forever, silently. Fixed by switching to `--pool=threads`, which
   keeps task execution in the same process. The exact same class of bug
   existed independently in `api-service`: `uvicorn --workers 4` ran 4
-  separate processes, each with its own `tasks_db` and its own
+  separate processes, each with its own copy of the (at the time,
+  in-memory) `tasks_db` and its own
   `api_requests_total`/`api_request_duration_seconds` - a request could
   land on any of the 4 at random, so both the task list *and* the metrics
   looked randomly inconsistent depending on which process served a given
-  request. Fixed to `--workers 1` (see `docs/architecture.md` §6). The
-  general lesson: any in-memory Prometheus metric (or any in-memory state
-  at all) needs a story for what happens across multiple processes/pods -
-  "it worked when I curled it once" does not prove it is process-safe.
+  request. Fixed to `--workers 1` (see `docs/architecture.md` §6). Task
+  storage has since been moved to Postgres (real persistence, shared
+  across processes/pods - see `database.py`/`models.py`), but the
+  Prometheus counters are still per-process in-memory objects, so
+  `--workers 1` remains load-bearing for *those* even though it's no
+  longer needed for task storage. The general lesson: any in-memory
+  Prometheus metric (or any in-memory state at all) needs a story for
+  what happens across multiple processes/pods - "it worked when I curled
+  it once" does not prove it is process-safe.
 - **CORS headers matter for `/metrics`, not just your main API.**
   `worker-service` exposed Prometheus metrics via
   `prometheus_client.start_http_server()`, which sends no CORS headers at

@@ -49,3 +49,4 @@ cicd-architect-exam-12jul2026/**/.terraform/
 cicd-architect-exam-12jul2026/**/*.tfstate
 cicd-architect-exam-12jul2026/**/*.tfstate.*
 cicd-architect-exam-12jul2026/.env
+cicd-architect-exam-12jul2026/.claude/
